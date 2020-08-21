@@ -4,6 +4,10 @@
 #include <unordered_map>
 #include <thread>
 
+#ifdef __linux__
+#include <X11/Xlib.h>
+#endif
+
 #include "CTetris.h"
 
 const int blockSize = 40;
@@ -99,6 +103,10 @@ void renderThreadFunc(sf::RenderWindow* window,
 
 int main(int argv, char* argc[])
 {
+    #ifdef __linux__
+    XInitThreads();
+    #endif
+
     srand(0);
     using namespace sf;
 
