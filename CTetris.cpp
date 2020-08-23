@@ -1,16 +1,12 @@
 #include "CTetris.h"
 #include <iostream>
+#include <assert.h>
 
 namespace game
 {
     CTetris::CTetris()
-    : CTetris(mDefaultFieldWidth, mDefaultFieldHeight)
-    {
-    }
-
-    CTetris::CTetris(const int fieldWidth, const int fieldHeight)
-    : mFieldWidth(fieldWidth)
-    , mFieldHeight(fieldHeight)
+    : mFieldWidth(mDefaultFieldWidth)
+    , mFieldHeight(mDefaultFieldHeight)
     , mCurrentFigure(-1)
     , mNextFigure(-1)
     , mTime(0.)
@@ -21,6 +17,7 @@ namespace game
     , mGameState(EGameState::STATE_MAIN_MENU)
     {
         initField();
+        resetField();
         spawnFigure();
     }
 
@@ -94,6 +91,7 @@ namespace game
 
     void CTetris::move(int deltaX)
     {
+        std::lock_guard<std::mutex> lock(mGuard);
         for (int i = 0; i < 4; ++i)
         {
             mB[i] = mA[i];
@@ -110,6 +108,7 @@ namespace game
 
     void CTetris::rotate()
     {
+        std::lock_guard<std::mutex> lock(mGuard);
         if (mCurrentFigure != 6) //Hard code for a 'O' figure because rotate a 'O' figure doesn't need
         {
             Point p = mA[1];
@@ -133,6 +132,7 @@ namespace game
 
     void CTetris::drop()
     {
+        std::lock_guard<std::mutex> lock(mGuard);
         mCurrentSpeed = mDropDefaultSpeed;
     }
 
@@ -152,7 +152,9 @@ namespace game
         {
             return;
         }
-        
+
+        std::lock_guard<std::mutex> lock(mGuard);
+
         mTime += dt;
         if (mTime > mCurrentSpeed)
         {
@@ -166,13 +168,11 @@ namespace game
                 for (int i = 0; i < 4; ++i)
                 {
                     mA[i] = mB[i];
-                    if(mA[i].y <= 0)
+                    if(mA[i].y < 0)
                     {
                         mGameState = EGameState::STATE_GAMEOVER;
-                        std::cout << "Game over" << std::endl;
                     }
-
-                    if(mA[i].y >= 0)
+                    else
                     {
                         mField[mA[i].y][mA[i].x] = mFigureColor;
                     } 
@@ -204,7 +204,6 @@ namespace game
                             mScores += 700;
                             break;
                     }
-                    std::cout << mScores << std::endl;
                     mCurrentNumLines = 0;
                 }
             }

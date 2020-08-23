@@ -1,6 +1,8 @@
 #pragma once
+
 #include <vector>
 #include <memory>
+#include <mutex>
 
 namespace game
 {
@@ -24,9 +26,12 @@ struct Point
 class CTetris
 {
 public: 
-    CTetris();
-    CTetris(const int fieldWidth, const int fieldHeight);
-    ~CTetris() = default;
+    static CTetris& getInstance()
+    {
+        static CTetris instance;
+        return instance;
+    }
+
     const TFieldType& getField() const;
     void move(int deltaX);
     void rotate();
@@ -43,6 +48,9 @@ public:
     void setGamePause();
     void resetGame();
 
+private:
+    CTetris();
+    ~CTetris() = default;
     CTetris(const CTetris& other) = delete;
     CTetris& operator=(const CTetris& other) = delete;
 
@@ -65,11 +73,12 @@ private:
     int mCurrentNumLines;
     int mScores;
     EGameState mGameState;
+    std::mutex mGuard;
 
-    static const int mDefaultFieldWidth = 10;
-    static const int mDefaultFieldHeight = 20;
     const float mDefaultSpeed = 0.3f;
     const float mDropDefaultSpeed = 0.01f;
+    static const int mDefaultFieldWidth = 10;
+    static const int mDefaultFieldHeight = 20;
 
     Point mA[4];
     Point mB[4];
