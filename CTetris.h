@@ -75,7 +75,7 @@ private:
     EGameState mGameState;
     std::mutex mGuard;
 
-    const float mDefaultSpeed = 0.3f;
+    const float mDefaultSpeed = 0.25f;
     const float mDropDefaultSpeed = 0.01f;
     static const int mDefaultFieldWidth = 10;
     static const int mDefaultFieldHeight = 20;

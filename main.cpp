@@ -4,8 +4,8 @@
 #include <unordered_map>
 #include <thread>
 #include <memory>
-#include <atomic>
-#include <mutex>
+#include <future>
+#include <chrono>
 
 #ifdef __linux__
 #include <X11/Xlib.h>
@@ -31,19 +31,19 @@ using TLabelsMap = std::unordered_map<ELabelType, std::unique_ptr<sf::Text>>;
 using TLabelsMapPtr = std::shared_ptr<TLabelsMap>;
 
 std::mutex guard;
+std::condition_variable cv;
 
 struct SSharedResources
 {
-    sf::RenderWindow* mWindow{ nullptr };
+    std::shared_ptr<sf::RenderWindow> mWindow;
     std::shared_ptr<sf::Sprite> mBackGound;
     std::shared_ptr<sf::Sprite> mFigureSprite;
     std::shared_ptr<TLabelsMap> mLabelsMap;
-    std::atomic<bool> mExitFlag{ false };
 };
 
 SSharedResources resources;
 
-void renderThreadFunc()
+void renderThreadFunc(std::future<void> exitSignal)
 {
     game::CTetris& theGame = game::CTetris::getInstance();
     auto fieldWidth = theGame.getFieldWidth();
@@ -64,13 +64,24 @@ void renderThreadFunc()
             }
         }
     };
-    
-    resources.mWindow->setActive(true);
-    while (!resources.mExitFlag)
+
+    sf::Clock clock;
+
+    auto update = [&theGame, &clock]()
     {
+        float time = clock.getElapsedTime().asSeconds();
+        clock.restart();
+        theGame.update(time);
+        std::string scString = std::to_string(theGame.getScores());
+        resources.mLabelsMap->at(ELabelType::SCORES)->setString(scString);
+    };
+    
+    while (exitSignal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout)
+    {
+        update();
         resources.mWindow->clear(sf::Color(0, 0, 30));
         resources.mWindow->draw(*resources.mBackGound);
-        drawField(resources.mWindow, resources.mFigureSprite.get());
+        drawField(resources.mWindow.get(), resources.mFigureSprite.get());
 
         const game::Point *figure = theGame.getCurrentFigure();
         const game::Point *nextFigure = theGame.getNextFigure();
@@ -114,23 +125,7 @@ void renderThreadFunc()
 
         resources.mWindow->display();
     }
-}
-
-void updateThreadFunc()
-{
-    sf::Clock clock;
-    
-    game::CTetris& tetris = game::CTetris::getInstance();
-    
-    while(!resources.mExitFlag)
-    {
-        float time = clock.getElapsedTime().asSeconds();
-        clock.restart();
-
-        tetris.update(time);
-        std::string scString = std::to_string(tetris.getScores());
-        resources.mLabelsMap->at(ELabelType::SCORES)->setString(scString);
-    }
+    resources.mWindow->setActive(false);
 }
 
 int main(int argv, char* argc[])
@@ -149,8 +144,9 @@ int main(int argv, char* argc[])
     VideoMode mode(
         static_cast<int>(tetris.getFieldWidth()) * blockSize + 150, 
         static_cast<int>(tetris.getFieldHeight()) * blockSize);
-    RenderWindow renderWindow(mode, "Tetris", sf::Style::Close);
-    resources.mWindow = &renderWindow;
+
+    resources.mWindow = std::make_shared<RenderWindow>(mode, "Tetris", sf::Style::Close);
+    resources.mWindow->setVerticalSyncEnabled(true);
 
     Texture t;
     t.loadFromFile("images/blocks.png");
@@ -212,22 +208,23 @@ int main(int argv, char* argc[])
     resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setCharacterSize(40);
     resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setStyle(sf::Text::Bold);
 
-    std::thread updateTh(updateThreadFunc);
-    updateTh.detach();
-
+    std::promise<void> exitSignal;
+    std::future<void> future = exitSignal.get_future();
+    bool isExit = false;
+    
     resources.mWindow->setActive(false);
-    std::thread renderTh(renderThreadFunc);
+    std::thread renderTh(renderThreadFunc, std::move(future));
     renderTh.detach();
 
-    while (!resources.mExitFlag)
+    while (resources.mWindow->isOpen())
     {
-        std::lock_guard<std::mutex> lock(guard);
         Event e;
         while (resources.mWindow->pollEvent(e))
         {
             if (e.type == Event::Closed)
             {
-                 resources.mExitFlag = true;
+                exitSignal.set_value();
+                isExit = true;
             }
 
             if (e.type == Event::KeyPressed)
@@ -264,12 +261,11 @@ int main(int argv, char* argc[])
                 }
             }
         }
-        if(resources.mExitFlag)
+        if(isExit)
         {
-            resources.mWindow->close();
             break;
         }
     }
-
+    
     return 0;
 }
