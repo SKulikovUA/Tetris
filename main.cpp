@@ -6,49 +6,92 @@
 #include <memory>
 #include <future>
 #include <chrono>
+#include <cassert>
 
 #ifdef __linux__
 #include <X11/Xlib.h>
 #endif
 
 #include "CTetris.h"
+#include "CResourceManager.h"
+#include "resources_id.h"
 
 const int blockSize = 40;
 
-enum class ELabelType
+std::shared_ptr<sf::RenderWindow> mWindow;
+
+void loadResources()
 {
-    SCORE_LABEL,
-    SCORES,
-    NEXT_FIGURE_LABEL,
-    NEW_GAME_LABEL,
-    PAUSE_LABEL,
-    GAME_OVER_LABEL
-};
+    using namespace game;
 
+    CResourceManager& manager = CResourceManager::getInstance();
+    CTetris& game = CTetris::getInstance();
 
+    std::shared_ptr<sf::Font> fontRes = manager.addResource<sf::Font>(ID_GAME_FONT);
+    fontRes->loadFromFile("images/font.ttf");
 
-using TLabelsMap = std::unordered_map<ELabelType, std::unique_ptr<sf::Text>>;
-using TLabelsMapPtr = std::shared_ptr<TLabelsMap>;
+    std::shared_ptr<sf::Texture> texRes = manager.addResource<sf::Texture>(ID_BACKGROUND_TEXTURE);
+    texRes->loadFromFile("images/back.jpg");
 
-std::mutex guard;
-std::condition_variable cv;
+    std::shared_ptr<sf::Sprite> sprite = manager.addResource<sf::Sprite>(ID_BACKGROUND_SPRITE);
+    sprite->setTexture(*texRes.get());
+    sprite->scale(sf::Vector2f(0.42f, 1.0f));
 
-struct SSharedResources
-{
-    std::shared_ptr<sf::RenderWindow> mWindow;
-    std::shared_ptr<sf::Sprite> mBackGound;
-    std::shared_ptr<sf::Sprite> mFigureSprite;
-    std::shared_ptr<TLabelsMap> mLabelsMap;
-};
+    texRes = manager.addResource<sf::Texture>(ID_SPRITE_TEXTURE);
+    texRes->loadFromFile("images/blocks.png");
+    sprite = manager.addResource<sf::Sprite>(ID_GAME_SPRITE);
+    sprite->setTexture(*texRes.get());
 
-SSharedResources resources;
+    std::shared_ptr<sf::Text> text = manager.addResource<sf::Text>(game::SCORE_LABEL);
+    text->setFont(*manager.getResourceFast<sf::Font>(ID_GAME_FONT));
+    text->setString("Score:");
+    sf::Vector2f labelsPos(static_cast<float>(game.getFieldWidth() * blockSize), 0.0f); 
+    text->setPosition(labelsPos);
+
+    int stringOffset = manager.getResourceFast<sf::Text>(game::SCORE_LABEL)->getCharacterSize();
+
+    text = manager.addResource<sf::Text>(SCORES);
+    text->setFont(*manager.getResourceFast<sf::Font>(game::ID_GAME_FONT));
+    text->setPosition(sf::Vector2f(labelsPos.x, static_cast<float>(stringOffset)));
+    text->setString("12345");
+
+    text = manager.addResource<sf::Text>(NEXT_FIGURE_LABEL);
+    text->setFont(*manager.getResourceFast<sf::Font>(ID_GAME_FONT));
+    text->setString("Next");
+    text->setPosition(sf::Vector2f(labelsPos.x, static_cast<float>(stringOffset * 3)));
+
+    text = manager.addResource<sf::Text>(NEW_GAME_LABEL);
+    text->setFont(*manager.getResourceFast<sf::Font>(ID_GAME_FONT));
+    text->setString("  Press 'N' key \nto start new game");
+    text->setPosition(sf::Vector2f(50.0f, 200.0f));
+    text->setFillColor(sf::Color::Yellow);
+    text->setCharacterSize(40);
+    text->setStyle(sf::Text::Bold);
+
+    text = manager.addResource<sf::Text>(GAME_OVER_LABEL);
+    text->setFont(*manager.getResourceFast<sf::Font>(ID_GAME_FONT));
+    text->setString("  Game over. \nPress 'R' key to\nstart new game");
+    text->setPosition(sf::Vector2f(50.0f, 200.0f));
+    text->setFillColor(sf::Color::Red);
+    text->setCharacterSize(40);
+    text->setStyle(sf::Text::Bold);
+
+    text = manager.addResource<sf::Text>(PAUSE_LABEL);
+    text->setFont(*manager.getResourceFast<sf::Font>(ID_GAME_FONT));
+    text->setString("   Pause\nPress 'P' key\nto continue");
+    text->setPosition(sf::Vector2f(50.0f, 200.0f));
+    text->setFillColor(sf::Color::Blue);
+    text->setCharacterSize(40);
+    text->setStyle(sf::Text::Bold);
+}
 
 void renderThreadFunc(std::future<void> exitSignal)
 {
     game::CTetris& theGame = game::CTetris::getInstance();
     auto fieldWidth = theGame.getFieldWidth();
 
-    auto drawField = [&theGame](sf::RenderWindow* window, sf::Sprite* figureSprite) {
+    auto drawField = [&theGame](sf::RenderWindow* window) {
+        std::shared_ptr<sf::Sprite> sprite = game::CResourceManager::getInstance().getResource<sf::Sprite>(game::ID_GAME_SPRITE);
         auto field = theGame.getField();
         for (int i = 0; i < field.size(); ++i)
         {
@@ -58,9 +101,9 @@ void renderThreadFunc(std::future<void> exitSignal)
                 {
                     continue;
                 }
-                figureSprite->setTextureRect(sf::IntRect(field[i][j] * blockSize, 0, blockSize, blockSize));
-                figureSprite->setPosition(static_cast<float>(j * blockSize), static_cast<float>(i * blockSize));
-                window->draw(*figureSprite);
+                sprite->setTextureRect(sf::IntRect(field[i][j] * blockSize, 0, blockSize, blockSize));
+                sprite->setPosition(static_cast<float>(j * blockSize), static_cast<float>(i * blockSize));
+                window->draw(*sprite);
             }
         }
     };
@@ -73,15 +116,16 @@ void renderThreadFunc(std::future<void> exitSignal)
         clock.restart();
         theGame.update(time);
         std::string scString = std::to_string(theGame.getScores());
-        resources.mLabelsMap->at(ELabelType::SCORES)->setString(scString);
+        game::CResourceManager::getInstance().getResource<sf::Text>(game::SCORES)->setString(scString);
     };
     
     while (exitSignal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout)
     {
         update();
-        resources.mWindow->clear(sf::Color(0, 0, 30));
-        resources.mWindow->draw(*resources.mBackGound);
-        drawField(resources.mWindow.get(), resources.mFigureSprite.get());
+        game::CResourceManager& manager = game::CResourceManager::getInstance();
+        mWindow->clear(sf::Color(0, 0, 30));
+        mWindow->draw(*manager.getResourceFast<sf::Sprite>(game::ID_BACKGROUND_SPRITE));
+        drawField(mWindow.get());
 
         const game::Point *figure = theGame.getCurrentFigure();
         const game::Point *nextFigure = theGame.getNextFigure();
@@ -90,42 +134,43 @@ void renderThreadFunc(std::future<void> exitSignal)
         if (theGame.getGameState() == game::EGameState::STATE_INGAME || 
             theGame.getGameState() == game::EGameState::STATE_PAUSE)
         {
+            std::shared_ptr<sf::Sprite> sprite = manager.getResource<sf::Sprite>(game::ID_GAME_SPRITE);
             for (int i = 0; i < 4; ++i)
             {
-                resources.mFigureSprite->setTextureRect(sf::IntRect(color * blockSize, 0, blockSize, blockSize));
-                resources.mFigureSprite->setPosition(static_cast<float>(figure[i].x * blockSize), static_cast<float>(figure[i].y * blockSize));
-                resources.mWindow->draw(*resources.mFigureSprite.get());
+                sprite->setTextureRect(sf::IntRect(color * blockSize, 0, blockSize, blockSize));
+                sprite->setPosition(static_cast<float>(figure[i].x * blockSize), static_cast<float>(figure[i].y * blockSize));
+                mWindow->draw(*sprite.get());
 
-                resources.mFigureSprite->setTextureRect(sf::IntRect(1, 0, blockSize, blockSize));
-                resources.mFigureSprite->setPosition(
+                sprite->setTextureRect(sf::IntRect(1, 0, blockSize, blockSize));
+                sprite->setPosition(
                     static_cast<float>(nextFigure[i].x * blockSize) + static_cast<float>(fieldWidth * blockSize + 40),
                     static_cast<float>(nextFigure[i].y * blockSize) + 100);
-                resources.mWindow->draw(*resources.mFigureSprite.get());
+                mWindow->draw(*sprite.get());
             }
         }
 
         switch(theGame.getGameState())
         {
             case game::EGameState::STATE_MAIN_MENU:
-                resources.mWindow->draw(*resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL));
+                mWindow->draw(*manager.getResourceFast<sf::Text>(game::NEW_GAME_LABEL));
                 break;
 
             case game::EGameState::STATE_GAMEOVER:
-                resources.mWindow->draw(*resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL));
+                mWindow->draw(*manager.getResourceFast<sf::Text>(game::GAME_OVER_LABEL));
                 break;
 
             case game::EGameState::STATE_PAUSE:
-                resources.mWindow->draw(*resources.mLabelsMap->at(ELabelType::PAUSE_LABEL));
+                mWindow->draw(*manager.getResourceFast<sf::Text>(game::PAUSE_LABEL));
                 break;
         }
             
-        resources.mWindow->draw(*resources.mLabelsMap->at(ELabelType::SCORE_LABEL));
-        resources.mWindow->draw(*resources.mLabelsMap->at(ELabelType::SCORES));
-        resources.mWindow->draw(*resources.mLabelsMap->at(ELabelType::NEXT_FIGURE_LABEL));
+        mWindow->draw(*manager.getResourceFast<sf::Text>(game::SCORE_LABEL));
+        mWindow->draw(*manager.getResourceFast<sf::Text>(game::SCORES));
+        mWindow->draw(*manager.getResourceFast<sf::Text>(game::NEXT_FIGURE_LABEL));
 
-        resources.mWindow->display();
+        mWindow->display();
     }
-    resources.mWindow->setActive(false);
+    mWindow->setActive(false);
 }
 
 int main(int argv, char* argc[])
@@ -137,6 +182,8 @@ int main(int argv, char* argc[])
     srand(0);
     using namespace sf;
 
+    loadResources();
+
     game::CTetris& tetris = game::CTetris::getInstance();
 
     const game::TFieldType& field = tetris.getField();
@@ -145,81 +192,25 @@ int main(int argv, char* argc[])
         static_cast<int>(tetris.getFieldWidth()) * blockSize + 150, 
         static_cast<int>(tetris.getFieldHeight()) * blockSize);
 
-    resources.mWindow = std::make_shared<RenderWindow>(mode, "Tetris", sf::Style::Close);
-    resources.mWindow->setVerticalSyncEnabled(true);
+    mWindow = std::make_shared<RenderWindow>(mode, "Tetris", sf::Style::Close);
+    mWindow->setVerticalSyncEnabled(true);
 
-    Texture t;
-    t.loadFromFile("images/blocks.png");
-
-    Texture back;
-    back.loadFromFile("images/back.jpg");
-
-    resources.mFigureSprite = std::make_shared<sf::Sprite>(t);
-
-    resources.mBackGound = std::make_shared<sf::Sprite>(back);
-    resources.mBackGound->scale(sf::Vector2f(0.42f, 1.0f));
-
-    std::unique_ptr<sf::Font> font = std::make_unique<sf::Font>();
-    font->loadFromFile("images/font.ttf");
+    std::shared_ptr<sf::Font> font = game::CResourceManager::getInstance().getResource<sf::Font>(game::ID_GAME_FONT);
 
     int fieldWidth = tetris.getFieldWidth();
-
-    resources.mLabelsMap = std::make_shared<TLabelsMap>();
-
-    resources.mLabelsMap->emplace(ELabelType::SCORE_LABEL, std::make_unique<sf::Text>());
-    resources.mLabelsMap->at(ELabelType::SCORE_LABEL)->setFont(*font);
-    resources.mLabelsMap->at(ELabelType::SCORE_LABEL)->setString("Score:");
-    sf::Vector2f labelsPos(static_cast<float>(fieldWidth * blockSize), 0.0f); 
-    resources.mLabelsMap->at(ELabelType::SCORE_LABEL)->setPosition(labelsPos);
-
-    int stringOffset = resources.mLabelsMap->at(ELabelType::SCORE_LABEL)->getCharacterSize();
-
-    resources.mLabelsMap->emplace(ELabelType::SCORES, std::make_unique<sf::Text>());
-    resources.mLabelsMap->at(ELabelType::SCORES)->setFont(*font);
-    resources.mLabelsMap->at(ELabelType::SCORES)->setPosition(sf::Vector2f(labelsPos.x, static_cast<float>(stringOffset)));
-    resources.mLabelsMap->at(ELabelType::SCORES)->setString("12345");
-
-    resources.mLabelsMap->emplace(ELabelType::NEXT_FIGURE_LABEL, std::make_unique<sf::Text>());
-    resources.mLabelsMap->at(ELabelType::NEXT_FIGURE_LABEL)->setFont(*font);
-    resources.mLabelsMap->at(ELabelType::NEXT_FIGURE_LABEL)->setString("Next");
-    resources.mLabelsMap->at(ELabelType::NEXT_FIGURE_LABEL)->setPosition(sf::Vector2f(labelsPos.x, static_cast<float>(stringOffset * 3)));
-
-    resources.mLabelsMap->emplace(ELabelType::NEW_GAME_LABEL, std::make_unique<sf::Text>());
-    resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL)->setFont(*font);
-    resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL)->setString("  Press 'N' key \nto start new game");
-    resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL)->setPosition(sf::Vector2f(50.0f, 200.0f));
-    resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL)->setFillColor(sf::Color::Yellow);
-    resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL)->setCharacterSize(40);
-    resources.mLabelsMap->at(ELabelType::NEW_GAME_LABEL)->setStyle(sf::Text::Bold);
-
-    resources.mLabelsMap->emplace(ELabelType::GAME_OVER_LABEL, std::make_unique<sf::Text>());
-    resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL)->setFont(*font);
-    resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL)->setString("  Game over. \nPress 'R' key to\nstart new game");
-    resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL)->setPosition(sf::Vector2f(50.0f, 200.0f));
-    resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL)->setFillColor(sf::Color::Red);
-    resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL)->setCharacterSize(40);
-    resources.mLabelsMap->at(ELabelType::GAME_OVER_LABEL)->setStyle(sf::Text::Bold);
-
-    resources.mLabelsMap->emplace(ELabelType::PAUSE_LABEL, std::make_unique<sf::Text>());
-    resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setFont(*font);
-    resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setString("   Pause\nPress 'P' key\nto continue");
-    resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setPosition(sf::Vector2f(50.0f, 200.0f));
-    resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setFillColor(sf::Color::Blue);
-    resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setCharacterSize(40);
-    resources.mLabelsMap->at(ELabelType::PAUSE_LABEL)->setStyle(sf::Text::Bold);
 
     std::promise<void> exitSignal;
     std::future<void> future = exitSignal.get_future();
     bool isExit = false;
     
-    resources.mWindow->setActive(false);
+    mWindow->setActive(false);
     std::thread renderTh(renderThreadFunc, std::move(future));
     renderTh.detach();
 
-    while (resources.mWindow->isOpen())
+    while (mWindow->isOpen())
     {
         Event e;
-        while (resources.mWindow->pollEvent(e))
+        while (mWindow->pollEvent(e))
         {
             if (e.type == Event::Closed)
             {
