@@ -85,7 +85,7 @@ void loadResources()
     text->setStyle(sf::Text::Bold);
 }
 
-void renderThreadFunc(std::future<void> exitSignal)
+void render()
 {
     game::CTetris& theGame = game::CTetris::getInstance();
     auto fieldWidth = theGame.getFieldWidth();
@@ -108,69 +108,56 @@ void renderThreadFunc(std::future<void> exitSignal)
         }
     };
 
-    sf::Clock clock;
+    game::CResourceManager& manager = game::CResourceManager::getInstance();
+    mWindow->clear(sf::Color(0, 0, 30));
+    mWindow->draw(*manager.getResourceFast<sf::Sprite>(game::ID_BACKGROUND_SPRITE));
+    drawField(mWindow.get());
 
-    auto update = [&theGame, &clock]()
+    const game::Point *figure = theGame.getCurrentFigure();
+    const game::Point *nextFigure = theGame.getNextFigure();
+    const int color = theGame.getFigureColor();
+
+    if (theGame.getGameState() == game::EGameState::STATE_INGAME ||
+        theGame.getGameState() == game::EGameState::STATE_PAUSE)
     {
-        float time = clock.getElapsedTime().asSeconds();
-        clock.restart();
-        theGame.update(time);
-        std::string scString = std::to_string(theGame.getScores());
-        game::CResourceManager::getInstance().getResource<sf::Text>(game::SCORES)->setString(scString);
-    };
-    
-    while (exitSignal.wait_for(std::chrono::milliseconds(1)) == std::future_status::timeout)
-    {
-        update();
-        game::CResourceManager& manager = game::CResourceManager::getInstance();
-        mWindow->clear(sf::Color(0, 0, 30));
-        mWindow->draw(*manager.getResourceFast<sf::Sprite>(game::ID_BACKGROUND_SPRITE));
-        drawField(mWindow.get());
-
-        const game::Point *figure = theGame.getCurrentFigure();
-        const game::Point *nextFigure = theGame.getNextFigure();
-        const int color = theGame.getFigureColor();
-
-        if (theGame.getGameState() == game::EGameState::STATE_INGAME || 
-            theGame.getGameState() == game::EGameState::STATE_PAUSE)
+        std::shared_ptr<sf::Sprite> sprite = manager.getResource<sf::Sprite>(game::ID_GAME_SPRITE);
+        for (int i = 0; i < 4; ++i)
         {
-            std::shared_ptr<sf::Sprite> sprite = manager.getResource<sf::Sprite>(game::ID_GAME_SPRITE);
-            for (int i = 0; i < 4; ++i)
-            {
-                sprite->setTextureRect(sf::IntRect(color * blockSize, 0, blockSize, blockSize));
-                sprite->setPosition(static_cast<float>(figure[i].x * blockSize), static_cast<float>(figure[i].y * blockSize));
-                mWindow->draw(*sprite.get());
+            sprite->setTextureRect(sf::IntRect(color * blockSize, 0, blockSize, blockSize));
+            sprite->setPosition(static_cast<float>(figure[i].x * blockSize), static_cast<float>(figure[i].y * blockSize));
+            mWindow->draw(*sprite.get());
 
-                sprite->setTextureRect(sf::IntRect(1, 0, blockSize, blockSize));
-                sprite->setPosition(
+            sprite->setTextureRect(sf::IntRect(1, 0, blockSize, blockSize));
+            sprite->setPosition(
                     static_cast<float>(nextFigure[i].x * blockSize) + static_cast<float>(fieldWidth * blockSize + 40),
                     static_cast<float>(nextFigure[i].y * blockSize) + 100);
-                mWindow->draw(*sprite.get());
-            }
+            mWindow->draw(*sprite.get());
         }
-
-        switch(theGame.getGameState())
-        {
-            case game::EGameState::STATE_MAIN_MENU:
-                mWindow->draw(*manager.getResourceFast<sf::Text>(game::NEW_GAME_LABEL));
-                break;
-
-            case game::EGameState::STATE_GAMEOVER:
-                mWindow->draw(*manager.getResourceFast<sf::Text>(game::GAME_OVER_LABEL));
-                break;
-
-            case game::EGameState::STATE_PAUSE:
-                mWindow->draw(*manager.getResourceFast<sf::Text>(game::PAUSE_LABEL));
-                break;
-        }
-            
-        mWindow->draw(*manager.getResourceFast<sf::Text>(game::SCORE_LABEL));
-        mWindow->draw(*manager.getResourceFast<sf::Text>(game::SCORES));
-        mWindow->draw(*manager.getResourceFast<sf::Text>(game::NEXT_FIGURE_LABEL));
-
-        mWindow->display();
     }
-    mWindow->setActive(false);
+
+    switch(theGame.getGameState())
+    {
+        case game::EGameState::STATE_MAIN_MENU:
+            mWindow->draw(*manager.getResourceFast<sf::Text>(game::NEW_GAME_LABEL));
+            break;
+
+        case game::EGameState::STATE_GAMEOVER:
+            //mWindow->draw(*manager.getResourceFast<sf::Text>(game::GAME_OVER_LABEL));
+            break;
+
+        case game::EGameState::STATE_PAUSE:
+            //mWindow->draw(*manager.getResourceFast<sf::Text>(game::PAUSE_LABEL));
+            break;
+            
+        default:
+            break;
+    }
+            
+    mWindow->draw(*manager.getResourceFast<sf::Text>(game::SCORE_LABEL));
+    mWindow->draw(*manager.getResourceFast<sf::Text>(game::SCORES));
+    mWindow->draw(*manager.getResourceFast<sf::Text>(game::NEXT_FIGURE_LABEL));
+
+    mWindow->display();
 }
 
 int main(int argv, char* argc[])
@@ -198,14 +185,17 @@ int main(int argv, char* argc[])
     std::shared_ptr<sf::Font> font = game::CResourceManager::getInstance().getResource<sf::Font>(game::ID_GAME_FONT);
 
     int fieldWidth = tetris.getFieldWidth();
-
-    std::promise<void> exitSignal;
-    std::future<void> future = exitSignal.get_future();
-    bool isExit = false;
     
-    mWindow->setActive(false);
-    std::thread renderTh(renderThreadFunc, std::move(future));
-    renderTh.detach();
+    sf::Clock clock;
+    
+    auto update = [&tetris, &clock]()
+    {
+        float time = clock.getElapsedTime().asSeconds();
+        clock.restart();
+        tetris.update(time);
+        std::string scString = std::to_string(tetris.getScores());
+        game::CResourceManager::getInstance().getResource<sf::Text>(game::SCORES)->setString(scString);
+    };
 
     while (mWindow->isOpen())
     {
@@ -214,8 +204,7 @@ int main(int argv, char* argc[])
         {
             if (e.type == Event::Closed)
             {
-                exitSignal.set_value();
-                isExit = true;
+                mWindow->close();
             }
 
             if (e.type == Event::KeyPressed)
@@ -252,10 +241,8 @@ int main(int argv, char* argc[])
                 }
             }
         }
-        if(isExit)
-        {
-            break;
-        }
+        update();
+        render();
     }
     
     return 0;
