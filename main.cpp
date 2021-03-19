@@ -11,6 +11,7 @@
 #include "CTetris.h"
 
 const int blockSize = 40;
+const float scaleFactor = 1.5f;
 
 enum class ELabelType
 {
@@ -24,16 +25,16 @@ enum class ELabelType
 
 using TLabelsMap = std::unordered_map<ELabelType, std::unique_ptr<sf::Text>>; 
 
-void renderThreadFunc(sf::RenderWindow* window, 
-                      sf::Sprite* backGround, 
+void renderFunc(sf::RenderWindow* window,
+                      const sf::Sprite* backGround,
                       sf::Sprite* figureSprite,
                       const TLabelsMap& labelsMap,
-                      game::CTetris* theGame)
+                      const game::CTetris* theGame)
 {
     auto fieldWidth = theGame->getFieldWidth();
 
-    auto drawField = [window, figureSprite, theGame]() {
-        auto field = theGame->getField();
+    auto drawField = [&window, &figureSprite, &theGame]() {
+        const auto& field = theGame->getField();
         for (int i = 0; i < field.size(); ++i)
         {
             for (int j = 0; j < field[0].size(); ++j)
@@ -49,56 +50,55 @@ void renderThreadFunc(sf::RenderWindow* window,
         }
     };
 
-    window->setActive(true);
-    while (window->isOpen())
+    window->clear(sf::Color(0, 0, 30));
+    window->draw(*backGround);
+    drawField();
+
+    const game::Point *figure = theGame->getCurrentFigure();
+    const game::Point *nextFigure = theGame->getNextFigure();
+    const int color = theGame->getFigureColor();
+
+    if (theGame->getGameState() == game::EGameState::STATE_INGAME ||
+        theGame->getGameState() == game::EGameState::STATE_PAUSE)
     {
-        window->clear(sf::Color(0, 0, 30));
-        window->draw(*backGround);
-        drawField();
-
-        const game::Point *figure = theGame->getCurrentFigure();
-        const game::Point *nextFigure = theGame->getNextFigure();
-        const int color = theGame->getFigureColor();
-
-        if (theGame->getGameState() == game::EGameState::STATE_INGAME || 
-            theGame->getGameState() == game::EGameState::STATE_PAUSE)
+        for (int i = 0; i < 4; ++i)
         {
-            for (int i = 0; i < 4; ++i)
-            {
-                figureSprite->setTextureRect(sf::IntRect(color * blockSize, 0, blockSize, blockSize));
-                figureSprite->setPosition(static_cast<float>(figure[i].x * blockSize), static_cast<float>(figure[i].y * blockSize));
-                window->draw(*figureSprite);
+            figureSprite->setTextureRect(sf::IntRect(color * blockSize, 0, blockSize, blockSize));
+            figureSprite->setPosition(static_cast<float>(figure[i].x * blockSize), static_cast<float>(figure[i].y * blockSize));
 
-                figureSprite->setTextureRect(sf::IntRect(1, 0, blockSize, blockSize));
-                figureSprite->setPosition(
+            window->draw(*figureSprite);
+
+            figureSprite->setTextureRect(sf::IntRect(1, 0, blockSize, blockSize));
+            figureSprite->setPosition(
                     static_cast<float>(nextFigure[i].x * blockSize) + static_cast<float>(fieldWidth * blockSize + 40),
                     static_cast<float>(nextFigure[i].y * blockSize) + 100);
-                window->draw(*figureSprite);
-            }
+            window->draw(*figureSprite);
         }
-
-        switch(theGame->getGameState())
-        {
-            case game::EGameState::STATE_MAIN_MENU:
-                window->draw(*labelsMap.at(ELabelType::NEW_GAME_LABEL));
-                break;
-
-            case game::EGameState::STATE_GAMEOVER:
-                window->draw(*labelsMap.at(ELabelType::GAME_OVER_LABEL));
-                break;
-
-            case game::EGameState::STATE_PAUSE:
-                window->draw(*labelsMap.at(ELabelType::PAUSE_LABEL));
-                break;
-        }
-
-        window->draw(*labelsMap.at(ELabelType::SCORE_LABEL));
-        window->draw(*labelsMap.at(ELabelType::SCORES));
-        window->draw(*labelsMap.at(ELabelType::NEXT_FIGURE_LABEL));
-
-        window->display();
     }
-    window->setActive(false);
+
+    switch(theGame->getGameState())
+    {
+        case game::EGameState::STATE_MAIN_MENU:
+            window->draw(*labelsMap.at(ELabelType::NEW_GAME_LABEL));
+            break;
+
+        case game::EGameState::STATE_GAMEOVER:
+            window->draw(*labelsMap.at(ELabelType::GAME_OVER_LABEL));
+            break;
+
+        case game::EGameState::STATE_PAUSE:
+            window->draw(*labelsMap.at(ELabelType::PAUSE_LABEL));
+            break;
+                
+        default:
+            break;
+    }
+
+    window->draw(*labelsMap.at(ELabelType::SCORE_LABEL));
+    window->draw(*labelsMap.at(ELabelType::SCORES));
+    window->draw(*labelsMap.at(ELabelType::NEXT_FIGURE_LABEL));
+
+    window->display();
 }
 
 int main(int argv, char* argc[])
@@ -114,8 +114,8 @@ int main(int argv, char* argc[])
     const game::TFieldType& field = tetris.getField();
 
     VideoMode mode(
-        static_cast<int>(field[0].size()) * blockSize + 150, 
-        static_cast<int>(field.size()) * blockSize);
+        static_cast<int>((field[0].size()) * blockSize + 150) * scaleFactor,
+        static_cast<int>((field.size()) * blockSize) * scaleFactor);
     RenderWindow window(mode, "Tetris", sf::Style::Close);
 
     Texture t;
@@ -123,8 +123,8 @@ int main(int argv, char* argc[])
 
     Texture back;
     back.loadFromFile("images/back.jpg");
-
     Sprite s(t);
+    s.scale(sf::Vector2f(scaleFactor, scaleFactor));
     Sprite b(back);
     b.scale(sf::Vector2f(0.42f, 1.0f));
 
@@ -176,10 +176,6 @@ int main(int argv, char* argc[])
 
     Clock clock;
 
-    window.setActive(false);
-    std::thread th(renderThreadFunc, &window, &b, &s, std::cref(labelsMap), &tetris);
-    th.detach();
-
     while (window.isOpen())
     {
         float time = clock.getElapsedTime().asSeconds();
@@ -225,10 +221,13 @@ int main(int argv, char* argc[])
                 case Keyboard::R:
                     tetris.resetGame();
                     break;
+                
+                default:
+                    break;
                 }
             }
         }
-
+        renderFunc(&window, &b, &s, labelsMap, &tetris);
         tetris.update(time);
         scString = std::to_string(tetris.getScores());
         labelsMap[ELabelType::SCORES]->setString(scString);
