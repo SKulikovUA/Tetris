@@ -10,8 +10,10 @@ set_target_properties(${TARGET} PROPERTIES
 )
 add_compile_definitions(SFML_STATIC)
 
+if(APPLE)
 find_package(PkgConfig REQUIRED)
 pkg_search_module(SFML REQUIRED SFML-graphics)
+endif(APPLE)
 
 include_directories(${SFML_INCLUDE_DIRS})
 link_directories(${SFML_LIBRARY_DIRS})
